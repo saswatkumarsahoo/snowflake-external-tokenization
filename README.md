@@ -2,7 +2,7 @@
 
 ## Usage
 This is an example to demonstrate snowflake external tokenization
-Blog Link - 
+Blog Link - https://medium.com/p/29273bf2c527
 ### Prerequisites
 
 - A (trial) Snowflake Account with ACCOUNTADMIN permission
