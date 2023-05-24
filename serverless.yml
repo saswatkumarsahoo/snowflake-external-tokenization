@@ -1,0 +1,131 @@
+service: snowflake-dynamic-masking
+frameworkVersion: '3'
+
+params:
+  default:
+    table_name: customers
+    api: detokenize_string
+    region: eu-west-1
+    snowflake_iam_role_name: SnowflakeApiIntegrationRole
+    stage: dev
+
+
+provider:
+  name: aws
+  stage: dev
+  runtime: python3.8
+  region: ${param:region}
+  memorySize: 128
+  timeout: 28
+  environment:
+    SNOWFLAKE_IAM_ROLE_NAME: ${param:snowflake_iam_role_name}
+    SF_USER: ${file(env.yml):SF_USER}
+    PASSWORD: ${file(env.yml):PASSWORD}
+    ACCOUNT:  ${file(env.yml):ACCOUNT}
+    WAREHOUSE: ${file(env.yml):WAREHOUSE}
+    DATABASE: ${file(env.yml):DATABASE}
+    SCHEMA: ${file(env.yml):SCHEMA}
+       
+  ecr:
+    images:
+      appimage:
+        path: ./custom_resources
+  iam:
+    role:
+      statements:
+        - Effect: Allow
+          Action: 
+            - dynamodb:Batch*
+            - dynamodb:*Item*
+          Resource: 'arn:aws:dynamodb:${param:region}:*:table/${param:table_name}'
+        - Effect: Allow
+          Action: 
+            - iam:*Role*
+          Resource: '*'
+        - Effect: Allow
+          Action: 
+            - apigateway:*
+          Resource: '*'
+	
+  # apiGateway:
+  #   resourcePolicy:
+  #     - Effect: Allow
+  #       Principal: 
+  #         AWS: 
+  #           - arn:aws:sts::${aws:accountId}:assumed-role/${param:snowflake_iam_role_name}/snowflake
+  #       Action: execute-api:Invoke
+  #       Resource:
+  #         - execute-api:/*/POST/${param:api}
+
+     
+package:
+  patterns:
+    - handler.py
+    - '!venv/**'
+    - '!.env'
+    - '!custom_resources/*'
+
+
+resources: 
+  Transform: "AWS::Serverless-2016-10-31"
+  Resources:
+    usersTable:
+      Type: AWS::DynamoDB::Table
+      Properties:
+        TableName: ${param:table_name}
+        AttributeDefinitions:
+          - AttributeName: id
+            AttributeType: S
+        KeySchema:
+          - AttributeName: id
+            KeyType: HASH
+        BillingMode: PAY_PER_REQUEST
+    setupResources:
+      DependsOn: DetokenizerLambdaFunction
+      Type: Custom::setupResources
+      Properties:
+        ServiceToken: !GetAtt SetupResourcesLambdaFunction.Arn
+    seederLambda:
+      Type: Custom::seederLambda
+      DependsOn: setupResources
+      Properties:
+        ServiceToken: !GetAtt SeederLambdaFunction.Arn
+    updateResourcesLambda:
+      DependsOn: seederLambda
+      Type: Custom::updateResourcesLambda
+      Properties:
+        ServiceToken: !GetAtt UpdateResourcesLambdaFunction.Arn
+        ApiGwId: !Ref ApiGatewayRestApi
+        Region: ${param:region}
+        AccountId: ${aws:accountId}
+        Stage: ${param:stage}
+
+functions:
+  setupResources:
+    image:
+      name: appimage
+      command:
+        - setup_resources.handler
+
+  updateResources:
+    image:
+      name: appimage
+      command:
+        - update_resources.handler
+
+  seeder:
+    image:
+      name: appimage
+      command:
+        - seeder.handler
+  
+  detokenizer:
+    handler: detokenizer.lambda_handler
+    environment: 
+      TABLE_NAME: ${param:table_name}
+    events:
+      - http:
+          path: /detokenize_string
+          method: post
+          authorizer:
+            type: aws_iam

@@ -1,0 +1,13 @@
+{
+    "Version": "2012-10-17",
+    "Statement": [
+        {
+            "Effect": "Allow",
+            "Principal": {
+                "AWS": "arn:aws:sts::{{ ACCOUNT_ID }}:assumed-role/{{ SNOWFLAKE_IAM_ROLE_NAME }}/snowflake"
+            },
+            "Action": "execute-api:Invoke",
+            "Resource": "*"
+        }
+    ]
+}
